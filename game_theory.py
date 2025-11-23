@@ -5,30 +5,32 @@ visited = set()
 
 def normalize(state):
     p0, p1, turn = state
-    
-    p0 = ((p0[0] % 5), (p0[1] % 5))
-    p1 = ((p1[0] % 5), (p1[1] % 5))
-    
+
     p0 = tuple(sorted(p0))
     p1 = tuple(sorted(p1))
-    
+
     return (p0, p1, turn)
+
 
 
 def generate_moves(state):
     p0, p1, turn = state
 
-    me = p0 if turn else p1   #
+    me  = p0 if turn else p1
     opp = p1 if turn else p0
 
     next_states = []
 
-    for i in range(2):      
-        for j in range(2):  
+    for i in range(2):        
+        for j in range(2):    
             if me[i] != 0 and opp[j] != 0:
                 nm = list(me)
                 no = list(opp)
-                no[j] = (no[j] + me[i]) % 5
+
+                no[j] = no[j] + me[i]
+
+                if no[j] >= 5:
+                    no[j] = 0
 
                 if turn:
                     next_p0, next_p1 = nm, no
@@ -39,7 +41,31 @@ def generate_moves(state):
                     normalize((next_p0, next_p1, not turn))
                 )
 
-    return next_states
+    a, b = me  
+
+    if a == 0 and b in (2, 4):
+        k = b // 2
+        nm = [k, k]
+        no = list(opp)
+
+        if turn:
+            next_p0, next_p1 = nm, no
+        else:
+            next_p0, next_p1 = no, nm
+
+        next_states.append(
+            normalize((next_p0, next_p1, not turn))
+        )
+        
+    out = []
+    seen = set()
+    for s in next_states:
+        if s not in seen:
+            seen.add(s)
+            out.append(s)
+
+    return out
+
 
 def build_tree(state):
     state = normalize(state)
