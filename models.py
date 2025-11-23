@@ -4,7 +4,7 @@ Supports various rule variations including modular arithmetic, different split r
 multi-player, and 'alien' configurations.
 """
 
-from typing import Tuple, Optional
+from typing import Tuple, Optional, List
 from dataclasses import dataclass
 
 
@@ -77,21 +77,22 @@ class Move:
     def __repr__(self) -> str:
         return f"Move({str(self)})"
 
-    def apply(self, game: 'Game') -> 'Game':
+    def apply(self, state: 'State', rules: 'Game') -> 'State':
         """
-        Apply this move to a game state and return the resulting game state.
+        Apply this move to a game state and return the resulting state.
 
         Args:
-            game: The current game state
+            state: The current game state
+            rules: The game rules
 
         Returns:
-            A new Game state after applying the move
+            A new State after applying the move
 
         Raises:
             ValueError: If the move is illegal
         """
-        me = game.curr_player
-        opp = game.next_player
+        me = state.curr_player
+        opp = state.next_player
 
         if self.move_type == 'attack':
             # Check legality: both hands must be alive
@@ -109,20 +110,19 @@ class Move:
             new_opp_hands[self.target_hand] = opp.hands[self.target_hand] + me.hands[self.source_hand]
 
             # Apply threshold rule (modular or standard)
-            if game.modular:
+            if rules.modular:
                 # Modular arithmetic: only die if exactly at threshold
-                if new_opp_hands[self.target_hand] == game.threshold:
+                if new_opp_hands[self.target_hand] == rules.threshold:
                     new_opp_hands[self.target_hand] = 0
-                elif new_opp_hands[self.target_hand] > game.threshold:
-                    new_opp_hands[self.target_hand] %= game.threshold
+                elif new_opp_hands[self.target_hand] > rules.threshold:
+                    new_opp_hands[self.target_hand] %= rules.threshold
             else:
                 # Standard: die if >= threshold
-                if new_opp_hands[self.target_hand] >= game.threshold:
+                if new_opp_hands[self.target_hand] >= rules.threshold:
                     new_opp_hands[self.target_hand] = 0
 
             # Swap players for next turn
-            return Game(Player(tuple(new_opp_hands)), Player(me.hands),
-                       game.threshold, game.modular, game.split_rule)
+            return State(Player(tuple(new_opp_hands)), Player(me.hands))
 
         elif self.move_type == 'split':
             # Check legality: total fingers must remain unchanged
@@ -132,30 +132,28 @@ class Move:
                 raise ValueError(f"Split must preserve total fingers: {me.hands} -> {self.result_hands}")
 
             # Check split rule constraints
-            if game.split_rule == 'change':
+            if rules.split_rule == 'change':
                 # State must change
                 if Player(self.result_hands) == me:
                     raise ValueError(f"Split must change state: {me.hands} -> {self.result_hands}")
-            elif game.split_rule == 'restrictive':
+            elif rules.split_rule == 'restrictive':
                 # Only allowed from 4-0 or 2-0
                 if me.hands not in [(4, 0), (2, 0)]:
                     raise ValueError(f"Restrictive split only allowed from 4-0 or 2-0, not {me.hands}")
-            elif game.split_rule == 'suicide':
+            elif rules.split_rule == 'suicide':
                 # Allow zeroing out a hand
                 pass
-            elif game.split_rule == 'free':
+            elif rules.split_rule == 'free':
                 # Any split allowed (but state must still change for canonical rules)
                 if Player(self.result_hands) == me:
                     raise ValueError(f"Split must change state: {me.hands} -> {self.result_hands}")
 
             # Split: redistribute own fingers
-            return Game(Player(opp.hands), Player(self.result_hands),
-                       game.threshold, game.modular, game.split_rule)
+            return State(Player(opp.hands), Player(self.result_hands))
 
         elif self.move_type == 'pass':
             # Pass: just swap players
-            return Game(Player(opp.hands), Player(me.hands),
-                       game.threshold, game.modular, game.split_rule)
+            return State(Player(opp.hands), Player(me.hands))
 
         else:
             raise ValueError(f"Unknown move type: {self.move_type}")
@@ -176,51 +174,32 @@ class Move:
         return Move('pass')
 
 
-class Game:
+class State:
     """
     Represents a game state in Chopsticks.
-
-    Designed to support various rule variations:
-    - Different thresholds (default 5, or 4)
-    - Modular arithmetic
-    - Different split rules
-    - Multi-player extensions (future)
-    - Alien configurations (different hand counts, finger capacities)
+    Just the player positions, no rules.
     """
 
-    def __init__(self, curr_player: Player, next_player: Player,
-                 threshold: int = 5,
-                 modular: bool = False,
-                 split_rule: str = 'restrictive'):
+    def __init__(self, curr_player: Player, next_player: Player):
         """
         Initialize a game state.
 
         Args:
             curr_player: The player whose turn it is
             next_player: The other player
-            threshold: Finger count at which a hand dies (default 5)
-            modular: If True, hand must reach exactly threshold to die (modular arithmetic)
-            split_rule: Splitting rules:
-                - 'change': state must change (canonical)
-                - 'restrictive': only 4-0 or 2-0
-                - 'free': any split
-                - 'suicide': can zero out a hand
         """
         self.curr_player = curr_player
         self.next_player = next_player
-        self.threshold = threshold
-        self.modular = modular
-        self.split_rule = split_rule
 
     def __str__(self) -> str:
-        """Pretty print as 'x-y/x-y (Pn)' format from the report."""
+        """Pretty print as 'x-y/x-y (P1)' format from the report."""
         return f"{self.curr_player}/{self.next_player} (P1)"
 
     def __repr__(self) -> str:
-        return f"Game({self.curr_player}/{self.next_player})"
+        return f"State({self.curr_player}/{self.next_player})"
 
     def __eq__(self, other) -> bool:
-        if not isinstance(other, Game):
+        if not isinstance(other, State):
             return False
         return (self.curr_player == other.curr_player and
                 self.next_player == other.next_player)
@@ -240,7 +219,96 @@ class Game:
             return "next_player"
         return None
 
-    def copy(self) -> 'Game':
-        """Create a copy of this game state."""
-        return Game(self.curr_player.copy(), self.next_player.copy(),
-                   self.threshold, self.modular, self.split_rule)
+    def copy(self) -> 'State':
+        """Create a copy of this state."""
+        return State(self.curr_player.copy(), self.next_player.copy())
+
+
+class Game:
+    """
+    Game rules for Chopsticks.
+
+    Designed to support various rule variations:
+    - Different thresholds (default 5, or 4)
+    - Modular arithmetic
+    - Different split rules
+    - Multi-player extensions (future)
+    - Alien configurations (different hand counts, finger capacities)
+    """
+
+    def __init__(self, threshold: int = 5, modular: bool = False, split_rule: str = 'restrictive'):
+        """
+        Initialize game rules.
+
+        Args:
+            threshold: Finger count at which a hand dies (default 5)
+            modular: If True, hand must reach exactly threshold to die (modular arithmetic)
+            split_rule: Splitting rules:
+                - 'change': state must change (canonical)
+                - 'restrictive': only 4-0 or 2-0
+                - 'free': any split
+                - 'suicide': can zero out a hand
+        """
+        self.threshold = threshold
+        self.modular = modular
+        self.split_rule = split_rule
+
+
+# Game tree node types
+
+class StandardNode:
+    """A continuing game state with possible moves and their resulting nodes."""
+
+    def __init__(self, state: State):
+        self.state = state
+        self.transitions: List[Tuple[Move, 'Node']] = []  # List of (Move, resulting Node) pairs
+
+    def add_transition(self, move: Move, node: 'Node'):
+        """Add a move and its resulting node to the transitions."""
+        self.transitions.append((move, node))
+
+    def __str__(self) -> str:
+        return f"StandardNode({self.state})"
+
+    def __repr__(self) -> str:
+        return f"StandardNode({self.state}, {len(self.transitions)} moves)"
+
+
+class WinNode:
+    """A terminal game state where one player has won."""
+
+    def __init__(self, state: State, winner: str):
+        """
+        Args:
+            state: The terminal game state
+            winner: "curr_player" or "next_player"
+        """
+        self.state = state
+        self.winner = winner
+
+    def __str__(self) -> str:
+        return f"WinNode({self.state}, winner={self.winner})"
+
+    def __repr__(self) -> str:
+        return f"WinNode({self.state}, winner={self.winner})"
+
+
+class LoopNode:
+    """A node representing a game state that has already been explored."""
+
+    def __init__(self, points_to: StandardNode):
+        """
+        Args:
+            points_to: The StandardNode that was already created for this state
+        """
+        self.points_to = points_to
+
+    def __str__(self) -> str:
+        return f"LoopNode -> {self.points_to.state}"
+
+    def __repr__(self) -> str:
+        return f"LoopNode(points to {self.points_to.state})"
+
+
+# Type alias for any node type
+Node = StandardNode | WinNode | LoopNode
